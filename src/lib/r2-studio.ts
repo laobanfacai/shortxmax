@@ -284,17 +284,26 @@ async function uploadMultipart(
   const started = await studioJson(cfg, "/api/v1/multipart", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Upload-Id": opts.uploadId },
-    body: JSON.stringify({ key: opts.rel, size: opts.buffer.length, fingerprint }),
+    body: JSON.stringify({ key: opts.rel, size: opts.buffer.length, fingerprint, partSize: PART_SIZE, contentType: opts.contentType }),
     signal: opts.signal,
   });
   if (!started.ok) throw new Error(started.message);
   const mid = String(started.data.id || started.data.uploadId || started.data.multipartId || "");
   if (!mid) throw new Error("分片上传初始化失败：接口没有返回分片任务 ID。");
 
-  const total = Math.ceil(opts.buffer.length / PART_SIZE);
+  // R2 Studio decides the final part size (5–90 MB); every part must match it exactly.
+  const partSize = Number(started.data.partSize) || PART_SIZE;
+  const total = Number(started.data.partCount) || Math.ceil(opts.buffer.length / partSize);
+  const abort = () =>
+    fetch(`${cfg.baseUrl}/api/v1/multipart/${encodeURIComponent(mid)}`, {
+      method: "DELETE",
+      headers: studioHeaders(cfg.apiKey),
+      cache: "no-store",
+    }).catch(() => null);
+  try {
   for (let n = 1; n <= total; n += 1) {
     if (opts.signal?.aborted) throw new Error("上传已取消");
-    const chunk = opts.buffer.subarray((n - 1) * PART_SIZE, n * PART_SIZE);
+    const chunk = opts.buffer.subarray((n - 1) * partSize, n * partSize);
     const part = await studioJson(cfg, `/api/v1/multipart/${encodeURIComponent(mid)}/parts/${n}`, {
       method: "PUT",
       headers: {
@@ -305,6 +314,10 @@ async function uploadMultipart(
       signal: opts.signal,
     });
     if (!part.ok) throw new Error(`分片 ${n}/${total} 失败：${part.message}`);
+  }
+  } catch (err) {
+    await abort();
+    throw err;
   }
 
   const done = await studioJson(cfg, `/api/v1/multipart/${encodeURIComponent(mid)}/complete`, {

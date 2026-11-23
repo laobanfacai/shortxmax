@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { StudioChannelCard, useStudioStatus } from "@/components/admin/StudioChannelCard";
 import { classifyUploadFailure } from "@/lib/storage-capacity";
+import { uploadFile } from "@/lib/upload-client";
 
 type Progress = {
   state: string;
@@ -57,7 +58,6 @@ export function UploadField({
   const [url, setUrl] = useState(defaultValue || "");
   const [status, setStatus] = useState("");
   const [progress, setProgress] = useState<Progress | null>(null);
-  const [uploadId, setUploadId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const esRef = useRef<EventSource | null>(null);
   const studioStatus = useStudioStatus();
@@ -81,75 +81,39 @@ export function UploadField({
       return;
     }
     closeStream();
-    const id = crypto.randomUUID ? crypto.randomUUID() : `job-${Date.now()}`;
     const ac = new AbortController();
     abortRef.current = ac;
-    setUploadId(id || null);
     setStatus("上传中…");
-    setProgress({ state: "queued", percent: 0 });
-
-    if (id) {
-      const es = new EventSource(`/api/admin/r2s/uploads/${encodeURIComponent(id)}/events`);
-      esRef.current = es;
-      const onEv = (e: MessageEvent) => {
-        try {
-          const j = JSON.parse(e.data) as Progress & { publicUrl?: string; shortUrl?: string };
-          setProgress({
-            state: j.state || "uploading",
-            percent: Number(j.percent) || 0,
-            speed: j.speed,
-            eta: j.eta,
-            accountName: j.accountName,
-            error: j.error,
-          });
-          if (j.publicUrl || j.shortUrl) setUrl(String(j.publicUrl || j.shortUrl));
-          if (j.state === "done" || j.state === "error" || j.state === "cancelled") closeStream();
-        } catch {
-          /* ignore */
-        }
-      };
-      es.addEventListener("upload", onEv);
-      es.addEventListener("snapshot", onEv);
-      es.onerror = () => {
-        /* proxy may return JSON error if not configured mid-flight; keep POST going */
-      };
-    }
-
-    const data = new FormData();
-    data.set("file", file);
-    data.set("kind", kind);
-    if (id) data.set("uploadId", id);
+    setProgress({ state: "uploading", percent: 0 });
     try {
-      const res = await fetch("/api/admin/upload", { method: "POST", body: data, signal: ac.signal });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const msg = classifyUploadFailure(json.error || "上传失败");
-        setStatus(`上传失败：${msg}。没有改走官方桶直传，也没有写入本机磁盘。`);
-        setProgress((p) => (p ? { ...p, state: "error", error: msg } : p));
-        closeStream();
-        return;
-      }
-      setUrl(json.url);
+      const out = await uploadFile(file, kind, {
+        signal: ac.signal,
+        onProgress: (p) =>
+          setProgress({
+            state: p.phase === "finalizing" ? "finalizing" : "uploading",
+            percent: p.total ? (p.sent / p.total) * 100 : 0,
+            speed: p.speed,
+            eta: p.eta,
+          }),
+      });
+      setUrl(out.url);
       setStatus("已上传");
-      setProgress((p) => (p ? { ...p, state: "done", percent: 100 } : p));
+      setProgress({ state: "done", percent: 100 });
     } catch (err) {
       if ((err as Error).name === "AbortError") {
         setStatus("已取消");
         setProgress((p) => (p ? { ...p, state: "cancelled" } : p));
       } else {
-        setStatus("上传失败");
-        setProgress((p) => (p ? { ...p, state: "error", error: "上传失败" } : p));
+        const msg = classifyUploadFailure((err as Error).message || "上传失败");
+        setStatus(`上传失败：${msg}`);
+        setProgress((p) => (p ? { ...p, state: "error", error: msg } : { state: "error", percent: 0, error: msg }));
       }
-    } finally {
-      closeStream();
     }
   }
 
   async function onCancel() {
+    // Aborting also deletes the multipart session on R2 Studio (see uploadFile).
     abortRef.current?.abort();
-    if (uploadId) {
-      await fetch(`/api/admin/r2s/uploads/${encodeURIComponent(uploadId)}`, { method: "DELETE" }).catch(() => null);
-    }
     setStatus("已取消");
     setProgress((p) => (p ? { ...p, state: "cancelled" } : p));
     closeStream();
@@ -171,14 +135,14 @@ export function UploadField({
       <StudioChannelCard compact />
       <input
         type="file"
-        accept={kind === "video" ? "video/mp4,video/webm" : "image/*"}
+        accept={kind === "video" ? "video/mp4,video/webm,video/quicktime,.mov" : "image/jpeg,image/png,image/webp"}
         className="mt-2 block text-sm text-muted"
         disabled={!studioReady}
         onChange={(e) => onFile(e.target.files?.[0] || null)}
       />
       {studioReady ? (
         <div className="mt-3 rounded-lg border p-3" style={{ borderColor: "var(--admin-border)" }}>
-          <p className="text-xs text-muted">R2 Studio 上传进度（由本站代理，不在浏览器暴露 Key）</p>
+          <p className="text-xs text-muted">上传进度（分片经本站转发到 R2 Studio，Key 不进浏览器）</p>
           {progress ? (
             <>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/10">
