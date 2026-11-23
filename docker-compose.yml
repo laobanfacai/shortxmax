@@ -1,0 +1,38 @@
+# LumeReel — later VPS deploy
+# 1) Copy .env.example to .env and fill AUTH_SECRET, SITE_URL, optional Stripe keys
+# 2) docker compose up -d --build
+# 3) First boot: docker compose exec app npx prisma db push && docker compose exec app npm run db:seed
+# To switch to Postgres later: change provider in prisma/schema.prisma, set DATABASE_URL, add a postgres service.
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "3100"
+      HOSTNAME: 0.0.0.0
+    volumes:
+      - ./uploads:/app/uploads
+      - ./prisma:/app/prisma
+      - ./public/uploads:/app/public/uploads
+    expose:
+      - "3100"
+    # Uncomment to publish the app directly without Nginx:
+    # ports:
+    #   - "3100:3100"
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      # - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./public:/var/www/public:ro
+      - ./uploads:/var/www/uploads:ro
+      # Mount certs later, e.g. ./nginx/certs:/etc/nginx/certs:ro

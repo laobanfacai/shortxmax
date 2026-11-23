@@ -1,0 +1,2 @@
+import { UserDirectory } from "@/components/admin/UserDirectory";
+export default async function Members({searchParams}:{searchParams:Promise<{q?:string;status?:string;vip?:string;page?:string}>}) {return <div><h1 className="admin-title">会员管理</h1><p className="admin-hint">独立会员目录，查看有效、过期、撤销记录。进入用户详情可授予 / 延长 / 撤销，操作均需确认与原因并写入日志。</p><a href="/admin/users" className="text-gold text-sm">给新用户授予会员 → 全部用户</a><UserDirectory members sp={await searchParams}/></div>;}

@@ -1,0 +1,392 @@
+// ShortXMax data model (code directory remains lumereel)
+// Local: SQLite via DATABASE_URL="file:./dev.db"
+// VPS later: change provider to "postgresql" and point DATABASE_URL at Postgres.
+// Avoid Prisma enums / native types that do not port cleanly between the two.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  sessionVersion Int @default(0)
+  passwordHash String
+  role         String   @default("user") // user | admin
+  status       String   @default("active") // active | banned
+  coins        Int      @default(0)
+  utmSource    String   @default("")
+  utmMedium    String   @default("")
+  utmCampaign  String   @default("")
+  country      String   @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  subscriptions Subscription[]
+  orders        Order[]
+  watchHistory  WatchHistory[]
+  myList        MyListItem[]
+  reviews       Review[]
+  unlocks       EpisodeUnlock[]
+}
+
+model Series {
+  id               String   @id @default(cuid())
+  slug             String   @unique
+  title            String
+  hook             String
+  synopsis         String
+  coverUrl         String
+  backdropUrl      String?
+  trailerUrl       String?
+  genre            String
+  tags             String   @default("[]") // JSON string array
+  rating           Float    @default(4.6)
+  ratingCount      Int      @default(0)
+  viewCount        BigInt   @default(0)
+  freeEpisodeCount Int      @default(3)
+  status           String   @default("published") // draft | published | archived
+  isTrending       Boolean  @default(false)
+  isFeatured       Boolean  @default(false)
+  isNew            Boolean  @default(false)
+  totalEpisodes    Int      @default(0)
+  releaseYear      Int      @default(2026)
+  language         String   @default("English")
+  seoTitle         String?
+  seoDescription   String?
+  sortOrder        Int      @default(0)
+  originalTitle    String?
+  externalId       String?  @unique
+  externalTradeId  String?
+  externalPk       String?
+  source           String?
+  sourceSubject    String?
+  favoriteCount    Int      @default(0)
+  isCatalogOnly    Boolean  @default(false)
+  isPaid           Boolean  @default(true)
+  updateStatus     String   @default("ended") // ongoing | ended
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  episodes Episode[]
+  reviews  Review[]
+  myList   MyListItem[]
+
+  @@index([status, viewCount])
+  @@index([status, createdAt])
+  @@index([status, genre])
+  @@index([status, isCatalogOnly])
+  @@index([source])
+  @@index([title])
+  @@index([externalTradeId])
+}
+
+model Episode {
+  id           String   @id @default(cuid())
+  seriesId     String
+  series       Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  number       Int
+  title        String
+  synopsis     String?
+  durationSec  Int      @default(90)
+  videoUrl     String?
+  thumbnailUrl String?
+  isFree       Boolean  @default(false)
+  isPublished  Boolean  @default(true)
+  coinPrice    Int      @default(49)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  watchHistory WatchHistory[]
+  unlocks      EpisodeUnlock[]
+
+  @@unique([seriesId, number])
+  @@index([seriesId])
+}
+
+model Plan {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  period        String // weekly | monthly | yearly
+  priceCents    Int
+  currency      String   @default("USD")
+  perks         String   @default("[]") // JSON string array
+  badge         String?
+  isPopular     Boolean  @default(false)
+  isEnabled     Boolean  @default(true)
+  stripePriceId String?
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  subscriptions Subscription[]
+  orders        Order[]
+}
+
+model CoinPackage {
+  id            String   @id @default(cuid())
+  name          String
+  coins         Int
+  bonusCoins    Int      @default(0)
+  priceCents    Int
+  currency      String   @default("USD")
+  isEnabled     Boolean  @default(true)
+  stripePriceId String?
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  orders Order[]
+}
+
+model Subscription {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId      String
+  plan        Plan     @relation(fields: [planId], references: [id])
+  status      String   @default("active") // active | canceled | expired | pending
+  startsAt    DateTime @default(now())
+  endsAt      DateTime
+  provider    String   @default("demo") // demo | stripe
+  orderId String? @unique
+  stripeSubId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, status])
+}
+
+model Order {
+  id            String       @id @default(cuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type          String // subscription | coins | unlock
+  amountCents   Int
+  currency      String       @default("USD")
+  status        String       @default("pending") // pending | paid | failed | refunded
+  provider      String       @default("demo") // demo | stripe
+  providerRef   String?
+  planId        String?
+  plan          Plan?        @relation(fields: [planId], references: [id])
+  coinPackageId String?
+  coinPackage   CoinPackage? @relation(fields: [coinPackageId], references: [id])
+  episodeId       String?
+  promoId         String?
+  listAmountCents Int?
+  utmSource       String?
+  utmMedium       String?
+  utmCampaign     String?
+  utmContent      String?
+  utmTerm         String?
+  country         String       @default("")
+  createdAt       DateTime     @default(now())
+  paidAt          DateTime?
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model WatchHistory {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  episodeId   String
+  episode     Episode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  progressSec Int      @default(0)
+  completed   Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, episodeId])
+  @@index([userId, updatedAt])
+}
+
+model MyListItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seriesId  String
+  series    Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, seriesId])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seriesId  String
+  series    Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  rating    Int
+  body      String
+  displayName String
+  isHidden    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([seriesId])
+}
+
+model EpisodeUnlock {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  episodeId String
+  episode   Episode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  coinsSpent Int     @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, episodeId])
+}
+
+model PaymentMethod {
+  id          String  @id @default(cuid())
+  name        String
+  provider    String // demo | stripe | paypal
+  description String  @default("")
+  isEnabled   Boolean @default(true)
+  sortOrder   Int     @default(0)
+}
+
+model SiteSettings {
+  id               String  @id @default("default")
+  siteName         String  @default("ShortXMax")
+  tagline          String  @default("Short dramas that hook you in minutes.")
+  seoTitle         String  @default("ShortXMax — Short dramas that hook you in minutes")
+  seoDescription   String  @default("Stream addictive English short dramas. New episodes daily. Watch free, then go VIP.")
+  ogImage          String  @default("/og.jpg")
+  socialLinks      String  @default("{}") // JSON
+  demoPayEnabled   Boolean @default(true)
+  stripePublicKey      String  @default("")
+  stripeSecretKey      String  @default("")
+  stripeWebhookSec     String  @default("")
+  stripeMode           String  @default("test") // test | live
+  stripeLivePublicKey  String  @default("")
+  stripeLiveSecretKey  String  @default("")
+  stripeLiveWebhookSec String  @default("")
+  stripeEnabled        Boolean @default(true)
+  paypalClientId       String  @default("")
+  paypalSecret         String  @default("")
+  paypalMode           String  @default("sandbox") // sandbox | live
+  paypalWebhookId      String  @default("")
+  paypalEnabled        Boolean @default(true)
+  metaPixelId          String  @default("")
+  tiktokPixelId        String  @default("")
+  googleTagId          String  @default("")
+  googleAdsId          String  @default("")
+  googleAdsLabel       String  @default("")
+  storageMode          String  @default("r2studio") // r2studio | r2  (local is legacy; new uploads never write disk)
+  supportEmail         String  @default("support@lumereel.com")
+  r2StudioBaseUrl      String  @default("https://r2.open-traffic.com")
+  r2StudioApiKey       String  @default("")
+  r2StudioEnabled      Boolean @default(false)
+  r2StudioTestedAt     DateTime?
+  r2StudioLastError    String  @default("")
+}
+
+model PromoCampaign {
+  id            String   @id @default(cuid())
+  name          String
+  badge         String   @default("")
+  headline      String   @default("")
+  description   String   @default("")
+  planPrices    String   @default("[]") // JSON [{id, promoCents}]
+  coinPrices    String   @default("[]")
+  startsAt      DateTime
+  endsAt        DateTime
+  showCountdown Boolean  @default(true)
+  isEnabled     Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model StorageEndpoint {
+  id            String    @id @default(cuid())
+  label         String
+  provider      String    @default("r2")
+  accountId     String    @default("")
+  accessKey     String    @default("")
+  secretKey     String    @default("")
+  bucket        String    @default("")
+  endpoint      String    @default("")
+  region        String    @default("auto")
+  publicBaseUrl String    @default("")
+  weight        Int       @default(1)
+  isEnabled     Boolean   @default(true)
+  sortOrder     Int       @default(0)
+  lastError     String    @default("")
+  lastOkAt      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+
+model Genre {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  blurb       String   @default("")
+  hook        String   @default("")
+  offer       String   @default("")
+  proof       String   @default("")
+  sortOrder   Int      @default(0)
+  isEnabled   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model HeroSlide {
+  id         String    @id @default(cuid())
+  title      String
+  subtitle   String    @default("")
+  ctaLabel   String    @default("Play Episode 1 free")
+  href       String    @default("/pricing")
+  imageUrl   String
+  seriesId   String?
+  sortOrder  Int       @default(0)
+  isEnabled  Boolean   @default(true)
+  startsAt   DateTime?
+  endsAt     DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
+model PageView {
+  id           String   @id @default(cuid())
+  path         String
+  source       String   @default("直接访问")
+  utmSource    String   @default("")
+  utmMedium    String   @default("")
+  utmCampaign  String   @default("")
+  referrer     String   @default("")
+  country      String   @default("未知")
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([source])
+  @@index([country])
+}
+
+model AdminAudit {
+ id String @id @default(cuid())
+ actorId String
+ userId String
+ action String
+ detail String
+ createdAt DateTime @default(now())
+ @@index([userId, createdAt])
+}
+model CheckoutRequest {
+ id String @id
+ userId String
+ orderId String @unique
+ createdAt DateTime @default(now())
+}
